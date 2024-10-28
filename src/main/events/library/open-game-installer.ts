@@ -10,7 +10,7 @@ import { generateYML } from "../helpers/generate-lutris-yaml";
 import { getDownloadsPath } from "../helpers/get-downloads-path";
 import { registerEvent } from "../register-event";
 
-const executeGameInstaller = (filePath: string) => {
+const executeGameInstaller = async (filePath: string) => {
   if (process.platform === "win32") {
     shell.openPath(filePath);
     return true;
@@ -20,6 +20,30 @@ const executeGameInstaller = (filePath: string) => {
     exec(`wine "${filePath}"`);
     return true;
   }
+
+	const STEAM_COMPAT_CLIENT_INSTALL_PATH = `${process.env.HOME}/.local/share/Steam`;
+	if (fs.existsSync(STEAM_COMPAT_CLIENT_INSTALL_PATH)) {
+		const [ ver ] = fs.readdirSync(`${STEAM_COMPAT_CLIENT_INSTALL_PATH}/steamapps/common/`).filter(proton => proton.startsWith('Proton '));
+		if (ver) {
+			const STEAM_COMPAT_MOUNTS = `${STEAM_COMPAT_CLIENT_INSTALL_PATH}/steamapps/common/${ver}`;
+			const STEAM_COMPAT_DATA_PATH = `${process.env.HOME}/.config/hydra/compatdata/${gameId}`;
+			const WINEPREFIX = `${STEAM_COMPAT_DATA_PATH}/pfx`;
+			if (!fs.existsSync(`${WINEPREFIX}/drive_c`))
+				fs.mkdirSync(`${WINEPREFIX}/drive_c`, { recursive: true });
+			if (!fs.existsSync(`${WINEPREFIX}/drive_c/Games`))
+				fs.symlinkSync(await getDownloadsPath(), `${WINEPREFIX}/drive_c/Games`);
+			exec(`"${STEAM_COMPAT_MOUNTS}/proton" run "${filePath}"`, {
+				env: {
+					...process.env,
+					STEAM_COMPAT_CLIENT_INSTALL_PATH,
+					STEAM_COMPAT_MOUNTS,
+					STEAM_COMPAT_DATA_PATH,
+					WINEPREFIX
+				}
+			});
+			return true;
+		}
+	}
 
   return false;
 };
@@ -56,7 +80,7 @@ const openGameInstaller = async (
 
   const setupPath = path.join(gamePath, "setup.exe");
   if (fs.existsSync(setupPath)) {
-    return executeGameInstaller(setupPath);
+    return await executeGameInstaller(setupPath);
   }
 
   const gamePathFileNames = fs.readdirSync(gamePath);
@@ -65,7 +89,7 @@ const openGameInstaller = async (
   );
 
   if (gamePathExecutableFiles.length === 1) {
-    return executeGameInstaller(
+    return await executeGameInstaller(
       path.join(gamePath, gamePathExecutableFiles[0])
     );
   }
